@@ -1,0 +1,30 @@
+[
+  {
+    "timestamp": "2026-01-12T22:22:47.766683",
+    "patient_data": {
+      "age": 12,
+      "symptoms": [
+        "chest_pain",
+        "severe_headache",
+        "cough"
+      ],
+      "heart_rate": 56,
+      "bp_systolic": 110,
+      "bp_diastolic": 120,
+      "spo2": 95,
+      "temperature": 98
+    },
+    "triage_result": {
+      "risk_score": 40,
+      "urgency_level": "MEDIUM",
+      "urgency_color": "#f59e0b",
+      "action": "Medical evaluation recommended",
+      "clinical_note": "Findings suggest need for medical evaluation and continued monitoring.",
+      "risk_factors": [
+        "Hypertensive crisis",
+        "Multiple critical symptoms"
+      ]
+    },
+    "xray_analyzed": false
+  }
+]

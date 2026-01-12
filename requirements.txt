@@ -1,0 +1,9 @@
+flask
+gunicorn
+numpy
+pandas
+Pillow
+opencv-python-headless
+torch
+torchvision
+requests

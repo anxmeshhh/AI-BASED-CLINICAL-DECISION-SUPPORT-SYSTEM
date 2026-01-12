@@ -6,21 +6,28 @@ Powered by EfficientNet-B0 + Groq Llama 3.3 70B
 Combines: Vitals Analysis + X-ray AI + Multi-Agent Decision Making
 """
 
+import os
+import json
+import time
+import sqlite3
+import requests
+import traceback
+import numpy as np
+from datetime import datetime
+from contextlib import contextmanager
 from flask import Flask, render_template, request, jsonify
 from werkzeug.utils import secure_filename
-import os
+
 import cv2
-import numpy as np
-from PIL import Image
 import torch
 import torch.nn as nn
+from PIL import Image
 from torchvision import transforms, models
-from datetime import datetime
-import requests
-import json
-import sqlite3
-from contextlib import contextmanager
-import time
+
+# ============================================
+# ENVIRONMENT DETECTION (RENDER SAFE MODE)
+# ============================================
+RENDER_ENV = os.environ.get("RENDER", "false").lower() == "true"
 
 # ============================================
 # FLASK CONFIG
@@ -49,7 +56,6 @@ def init_database():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
                 patient_id TEXT,
-                
                 -- Vitals Data
                 age INTEGER,
                 heart_rate INTEGER,
@@ -58,27 +64,22 @@ def init_database():
                 spo2 INTEGER,
                 temperature REAL,
                 symptoms TEXT,
-                
                 -- Triage Results
                 vitals_risk_score INTEGER,
                 initial_urgency TEXT,
-                
                 -- X-ray Analysis
                 image_path TEXT,
                 heatmap_path TEXT,
                 xray_diagnosis TEXT,
                 xray_confidence REAL,
-                
                 -- Final Decision
                 final_urgency TEXT,
                 final_risk_score INTEGER,
                 icu_required INTEGER,
                 isolation_required INTEGER,
-                
                 -- AI Analysis
                 ai_clinical_summary TEXT,
                 recommended_actions TEXT,
-                
                 -- Metadata
                 analysis_time_seconds REAL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -86,6 +87,7 @@ def init_database():
         ''')
         conn.commit()
     print("✅ Clinical Decision Database initialized")
+
 
 @contextmanager
 def get_db():
@@ -95,6 +97,7 @@ def get_db():
         yield conn
     finally:
         conn.close()
+
 
 def save_clinical_assessment(data: dict):
     """Save clinical assessment to database"""
@@ -126,6 +129,7 @@ def save_clinical_assessment(data: dict):
         print(f"❌ Database error: {e}")
         return False
 
+
 def get_recent_assessments(limit=10):
     """Get recent clinical assessments"""
     try:
@@ -139,44 +143,49 @@ def get_recent_assessments(limit=10):
     except:
         return []
 
+
 init_database()
 
 # ============================================
 # ML MODEL SETUP
 # ============================================
-print("🔧 Loading AI Clinical Decision Support Model...")
+print("🔧 Initializing AI Clinical Decision Support System...")
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() and not RENDER_ENV else "cpu")
 NUM_CLASSES = 4
 MODEL_LOADED = False
 model = None
 class_names = ['COVID-19', 'NORMAL', 'PNEUMONIA', 'TUBERCULOSIS']
 
-try:
-    model = models.efficientnet_b0(weights=None)
-    model.classifier[1] = nn.Linear(model.classifier[1].in_features, NUM_CLASSES)
-    
-    # Try multiple model paths
-    model_paths = ["models/best_model.pth", "models/final_model.pth", "models/efficientnet_pneumonia.pth"]
-    loaded = False
-    
-    for model_path in model_paths:
-        if os.path.exists(model_path):
-            model.load_state_dict(torch.load(model_path, map_location=device))
-            model.to(device)
-            model.eval()
-            MODEL_LOADED = True
-            loaded = True
-            print(f"✅ AI Model loaded from {model_path}")
-            break
-    
-    if not loaded:
-        print("⚠️ No model file found - using demo mode with simulated predictions")
-        MODEL_LOADED = False
-        
-except Exception as e:
-    print(f"⚠️ Model loading issue: {e}")
+if RENDER_ENV:
+    print("⚠️ Render environment detected — running in SAFE DEMO MODE (no model load)")
     MODEL_LOADED = False
+else:
+    try:
+        model = models.efficientnet_b0(weights=None)
+        model.classifier[1] = nn.Linear(model.classifier[1].in_features, NUM_CLASSES)
+
+        model_paths = [
+            "models/best_model.pth",
+            "models/final_model.pth",
+            "models/efficientnet_pneumonia.pth"
+        ]
+
+        for model_path in model_paths:
+            if os.path.exists(model_path):
+                model.load_state_dict(torch.load(model_path, map_location=device))
+                model.to(device)
+                model.eval()
+                MODEL_LOADED = True
+                print(f"✅ AI Model loaded from {model_path}")
+                break
+
+        if not MODEL_LOADED:
+            print("⚠️ No model file found — switching to demo inference mode")
+
+    except Exception as e:
+        print(f"⚠️ Model initialization failed: {e}")
+        MODEL_LOADED = False
 
 # ============================================
 # IMAGE PREPROCESSING
@@ -187,12 +196,15 @@ transform = transforms.Compose([
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 
+
 def preprocess_image(img_path):
     img = Image.open(img_path).convert("RGB")
     return transform(img).unsqueeze(0).to(device)
 
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 
 # ============================================
 # VITALS ANALYSIS - CLINICAL TRIAGE
@@ -296,6 +308,7 @@ def calculate_vitals_risk_score(age, symptoms, heart_rate, bp_systolic, bp_diast
         'critical_flags': critical_flags
     }
 
+
 # ============================================
 # HEATMAP GENERATION
 # ============================================
@@ -325,6 +338,7 @@ def generate_clinical_heatmap(img_path):
     except Exception as e:
         print(f"❌ Heatmap error: {e}")
         return None
+
 
 # ============================================
 # X-RAY ANALYSIS
@@ -373,6 +387,7 @@ def analyze_xray(img_path):
     except Exception as e:
         print(f"❌ X-ray analysis error: {e}")
         return None
+
 
 # ============================================
 # GROQ AI - CLINICAL DECISION MAKING
@@ -430,6 +445,7 @@ def call_groq_clinical_ai(prompt: str) -> dict:
         print(f"❌ Groq API error: {e}")
         return {'error': str(e), 'fallback_used': True}
 
+
 def generate_clinical_summary(vitals_data, xray_data=None):
     """Generate AI-powered clinical summary"""
     
@@ -464,43 +480,35 @@ CHEST X-RAY AI ANALYSIS:
 Provide clinical decision support in JSON format:
 {
     "clinical_summary": "Brief 2-3 sentence clinical assessment",
-    
     "final_urgency_recommendation": "EMERGENCY/HIGH/MEDIUM/LOW",
-    
     "icu_assessment": {
         "icu_required": true/false,
         "risk_score": 0-100,
         "reasoning": "Why ICU is/isn't needed"
     },
-    
     "immediate_actions": [
         "Action 1 with timing",
         "Action 2 with timing",
         "Action 3 with timing"
     ],
-    
     "diagnostic_tests": [
         "Test 1",
         "Test 2",
         "Test 3"
     ],
-    
     "treatment_recommendations": [
         "Treatment 1",
         "Treatment 2"
     ],
-    
     "isolation_requirement": {
         "required": true/false,
         "type": "Airborne/Droplet/Contact/None",
         "reasoning": "Why"
     },
-    
     "red_flags": [
         "Critical sign 1 to monitor",
         "Critical sign 2 to monitor"
     ],
-    
     "follow_up": "When to reassess"
 }
 
@@ -514,6 +522,7 @@ Be concise, evidence-based, and actionable for ER physicians.
         return generate_fallback_summary(vitals_data, xray_data)
     
     return ai_response
+
 
 def generate_fallback_summary(vitals_data, xray_data=None):
     """Fallback summary when GROQ API unavailable"""
@@ -561,16 +570,17 @@ def generate_fallback_summary(vitals_data, xray_data=None):
         'fallback_mode': True
     }
 
+
 # ============================================
 # ROUTES
 # ============================================
-
 @app.route('/')
 def index():
     recent = get_recent_assessments(5)
     return render_template('index.html', 
                          model_loaded=MODEL_LOADED,
                          recent_cases=recent)
+
 
 @app.route('/health')
 def health():
@@ -581,9 +591,7 @@ def health():
         'groq_enabled': bool(GROQ_API_KEY and GROQ_API_KEY != 'YOUR_GROQ_API_KEY_HERE')
     })
 
-# ============================================
-# MAIN ANALYSIS ENDPOINT
-# ============================================
+
 @app.route('/analyze', methods=['POST'])
 def analyze():
     start_time = time.time()
@@ -601,6 +609,7 @@ def analyze():
         spo2 = int(data.get('spo2', 100))
         temperature = float(data.get('temperature', 98.6))
         symptoms = data.get('symptoms', '').split(',') if data.get('symptoms') else []
+        symptoms = [s.strip() for s in symptoms if s.strip()]
         
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
@@ -754,9 +763,9 @@ def analyze():
         
     except Exception as e:
         print(f"❌ Analysis error: {e}")
-        import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
 
 @app.route('/history')
 def history():
@@ -768,6 +777,7 @@ def history():
         'assessments': assessments
     })
 
+
 # ============================================
 # ERROR HANDLERS
 # ============================================
@@ -775,13 +785,16 @@ def history():
 def file_too_large(e):
     return jsonify({'error': 'File too large (max 16MB)'}), 413
 
+
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({'error': 'Not found'}), 404
 
+
 @app.errorhandler(500)
 def internal_error(e):
     return jsonify({'error': 'Internal server error'}), 500
+
 
 # ============================================
 # MAIN
@@ -794,8 +807,9 @@ if __name__ == '__main__':
     print(f"ML Model:     EfficientNet-B0")
     print(f"AI Engine:    Groq Llama 3.3 70B")
     print(f"Device:       {device}")
-    print(f"Features:     Vitals Triage + X-ray Analysis + AI Decision Support")
-    print(f"\n🌐 Server: http://localhost:5000")
+    print(f"Environment:  {'Render (safe demo)' if RENDER_ENV else 'Local/Full'}")
+    print(f"\n🌐 Server running on port: {os.environ.get('PORT', 5000)}")
     print("="*80 + "\n")
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
